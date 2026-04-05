@@ -1,0 +1,131 @@
+import { CHARACTER_LIMIT } from "../constants.ts";
+import type { DeliveryInfo, FormattedMeal, Meal, UpcomingDay } from "../types.ts";
+
+export function getNextMonday(): string {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const daysUntilMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+  const nextMonday = new Date(today);
+  nextMonday.setDate(today.getDate() + daysUntilMonday);
+  return nextMonday.toISOString().split("T")[0] ?? "";
+}
+
+export function formatMeal(meal: Meal): FormattedMeal {
+  return {
+    id: meal.id,
+    name: meal.name,
+    description: meal.shortDescription,
+    chef: `${meal.chef.firstName} ${meal.chef.lastName}`,
+    category: meal.category.title,
+    price: meal.finalPrice,
+    original_price: meal.price,
+    rating: meal.userRating,
+    inventory_id: meal.inventoryId,
+    batch_id: meal.batchId,
+    in_stock: meal.stock > 0,
+    stock: meal.stock,
+    is_new: meal.isNewMeal,
+    image: meal.image,
+    nutrition: meal.nutritionalFacts,
+    tags: {
+      cuisines: meal.searchBy.cuisines,
+      diet_tags: meal.searchBy.dietTags,
+      protein_tags: meal.searchBy.proteinTags,
+      ingredients: meal.searchBy.ingredients,
+    },
+    meat_type: meal.meatType,
+  };
+}
+
+export function formatDelivery(day: UpcomingDay): DeliveryInfo {
+  const status = !day.canEdit
+    ? "locked"
+    : day.skip
+      ? "skipped"
+      : day.isPaused
+        ? "paused"
+        : "active";
+
+  const cartItems = (day.cart || []).map((c) => ({
+    name: c.product?.name ?? "Unknown",
+    inventory_id: c.product?.inventoryId ?? "",
+    quantity: c.qty,
+    price: c.product?.price_incl_tax ?? 0,
+    chef: `${c.product?.chef_firstname ?? ""} ${c.product?.chef_lastname ?? ""}`.trim(),
+  }));
+
+  const orderInfo =
+    day.order && day.order.items?.length > 0
+      ? {
+          id: day.order.id,
+          status: day.order.orderStatus?.status ?? null,
+          grand_total: day.order.grandTotal ?? 0,
+          items: day.order.items.map((item) => ({
+            name: item.product?.name ?? "Unknown",
+            inventory_id: item.product?.inventoryId ?? "",
+            quantity: item.qty,
+            price: item.price?.price ?? 0,
+            chef: `${item.product?.chef_firstname ?? ""} ${item.product?.chef_lastname ?? ""}`.trim(),
+          })),
+          item_count: day.order.items.reduce((sum, i) => sum + (i.qty || 0), 0),
+        }
+      : null;
+
+  const recMeals = day.recommendation?.meals || [];
+  const recommendationItems = recMeals.map((m) => ({
+    name: m.name ?? "Unknown",
+    inventory_id: m.inventoryId ?? "",
+    quantity: m.qty ?? 1,
+    price: 0,
+    chef: `${m.chef_firstname ?? ""} ${m.chef_lastname ?? ""}`.trim(),
+  }));
+
+  return {
+    date: day.displayDate,
+    status,
+    can_edit: day.canEdit,
+    menu_available: day.menuAvailable,
+    cutoff: day.cutoff?.time ?? null,
+    cutoff_timezone: day.cutoff?.userTimeZone ?? null,
+    cart_items: cartItems,
+    cart_count: cartItems.reduce((sum, c) => sum + (c.quantity || 0), 0),
+    order: orderInfo,
+    recommendation_items: recommendationItems,
+    recommendation_count: recommendationItems.reduce(
+      (sum, r) => sum + (r.quantity || 0),
+      0,
+    ),
+  };
+}
+
+export function formatMealText(m: FormattedMeal): string {
+  const lines = [
+    `${m.name}${m.is_new ? " [NEW]" : ""}`,
+    `  Chef: ${m.chef} | Category: ${m.category}`,
+    `  Price: $${m.price.toFixed(2)}${m.price !== m.original_price ? ` (was $${m.original_price.toFixed(2)})` : ""} | Rating: ${m.rating != null ? `${m.rating}/5` : "—"}`,
+    `  Stock: ${m.in_stock ? m.stock : "Out of stock"} | ID: ${m.inventory_id}`,
+    `  ${m.description}`,
+    `  ${m.meat_type} | ${m.nutrition.calories} cal`,
+  ];
+  if (m.tags.diet_tags.length > 0) lines.push(`  Tags: ${m.tags.diet_tags.join(", ")}`);
+  return lines.join("\n");
+}
+
+export function truncateIfNeeded<T>(
+  items: T[],
+  textContent: string,
+): { items: T[]; truncated: boolean; message?: string } {
+  if (textContent.length <= CHARACTER_LIMIT) return { items, truncated: false };
+  const reduced = items.slice(0, Math.max(1, Math.floor(items.length / 2)));
+  return {
+    items: reduced,
+    truncated: true,
+    message: `Response truncated from ${items.length} to ${reduced.length} items. Use --offset/--limit or filters to see more.`,
+  };
+}
+
+export function printError(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Error: ${message}`);
+  process.exit(1);
+}
