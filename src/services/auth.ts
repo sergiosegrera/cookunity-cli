@@ -2,6 +2,7 @@ import { AUTH_BASE_URL, AUTH_CLIENT_ID, AUTH_REALM } from "../constants.ts";
 import type { AuthTokens } from "../types.ts";
 
 const REDIRECT_URI = "https://www.cookunity.com";
+const TOKEN_CACHE_PATH = `${Bun.env.HOME}/.cookunity/tokens.json`;
 
 function fetchWithJar(
   jar: Map<string, string>,
@@ -25,6 +26,25 @@ function fetchWithJar(
   return response;
 }
 
+async function readCachedTokens(): Promise<AuthTokens | null> {
+  try {
+    const file = Bun.file(TOKEN_CACHE_PATH);
+    if (!(await file.exists())) return null;
+    return (await file.json()) as AuthTokens;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCachedTokens(tokens: AuthTokens): Promise<void> {
+  try {
+    await Bun.write(TOKEN_CACHE_PATH, JSON.stringify(tokens));
+    Bun.spawnSync(["chmod", "600", TOKEN_CACHE_PATH]);
+  } catch {
+    // non-fatal — cache write failure shouldn't break the CLI
+  }
+}
+
 export class CookUnityAuth {
   private email: string;
   private password: string;
@@ -39,8 +59,28 @@ export class CookUnityAuth {
     if (this.tokens && this.isTokenValid(this.tokens)) {
       return this.tokens.access_token;
     }
+
+    // Try file cache before doing a full auth round-trip
+    if (!this.tokens) {
+      const cached = await readCachedTokens();
+      if (cached) {
+        if (this.isTokenValid(cached)) {
+          this.tokens = cached;
+          return this.tokens.access_token;
+        }
+        if (cached.refresh_token) {
+          try {
+            await this.refresh(cached.refresh_token);
+            return this.tokens!.access_token;
+          } catch {
+            // refresh failed — fall through to full auth
+          }
+        }
+      }
+    }
+
     await this.authenticate();
-    return this.tokens?.access_token;
+    return this.tokens!.access_token;
   }
 
   private isTokenValid(tokens: AuthTokens): boolean {
@@ -133,5 +173,34 @@ export class CookUnityAuth {
       refresh_token: tokenData.refresh_token,
       expires_at: Date.now() + (tokenData.expires_in ?? 86400) * 1000,
     };
+    await writeCachedTokens(this.tokens);
+  }
+
+  private async refresh(refreshToken: string): Promise<void> {
+    const res = await fetch(`${AUTH_BASE_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: AUTH_CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Refresh failed: HTTP ${res.status}`);
+
+    const data = (await res.json()) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+    if (!data.access_token) throw new Error("Refresh failed: no access token");
+
+    this.tokens = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token ?? refreshToken,
+      expires_at: Date.now() + (data.expires_in ?? 86400) * 1000,
+    };
+    await writeCachedTokens(this.tokens);
   }
 }
