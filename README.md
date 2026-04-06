@@ -83,7 +83,7 @@ cookunity user   # Account info, plan, addresses
 ## Limitations
 
 - **Unofficial / reverse-engineered**: Uses CookUnity's internal GraphQL API, which is undocumented and may change without notice, breaking this tool.
-- **No token persistence**: Authentication runs the full OAuth flow on each process start. Tokens are cached in memory for the duration of the session only.
+- **Token persistence**: Tokens are cached in `~/.cookunity/tokens.json` (chmod 600) and reused across invocations. Expired tokens attempt a refresh before falling back to a full OAuth flow.
 - **Write operations at your own risk**: Commands that modify your order (cart, skip, confirm) interact with real orders and real charges.
 - **Bun only**: The pre-built binary is self-contained, but running from source requires Bun — it will not run on Node.js.
 - **Single account**: Credentials are read from environment variables; no multi-account support.

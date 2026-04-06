@@ -49,4 +49,4 @@ For full options and flags, see [references/commands.md](references/commands.md)
 - **Dates** are always `YYYY-MM-DD` and correspond to delivery dates (typically Mondays)
 - **inventoryId** format is `ii-<number>` (e.g. `ii-135418644`) — find via `menu` or `search`
 - `cart add/remove/clear` and `order confirm` affect real orders and real charges
-- Auth runs the full OAuth flow on each invocation; no token caching between sessions
+- Auth tokens are cached in `~/.cookunity/tokens.json` and reused across invocations; full OAuth only runs when the token is missing or expired
